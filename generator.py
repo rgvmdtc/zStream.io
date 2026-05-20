@@ -13,6 +13,14 @@ def get_addon_version(addon_dir):
     return None
 
 def zip_addon(addon_id, version):
+    # Delete any existing zip files in this addon directory first
+    for f in os.listdir(addon_id):
+        if f.endswith('.zip'):
+            try:
+                os.remove(os.path.join(addon_id, f))
+            except Exception as e:
+                print(f"Failed to delete old zip {f}: {e}")
+                
     zip_name = f"{addon_id}-{version}.zip"
     zip_path = os.path.join(addon_id, zip_name)
     print(f"Creating {zip_path}...")

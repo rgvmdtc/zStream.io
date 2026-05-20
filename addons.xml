@@ -21,18 +21,24 @@
         </assets>
     </extension>
 </addon>
-<addon id="repository.zstream" name="zStream Repository" version="1.0.0" provider-name="zStream Team">
+<addon id="repository.zstream" name="zStream Repository" version="1.0.1" provider-name="zStream Team">
+    <requires>
+        <import addon="xbmc.addon" version="12.0.0"/>
+    </requires>
     <extension point="xbmc.addon.repository" name="zStream Repository">
         <dir>
-            <info compressed="false">https://raw.githubusercontent.com/rgvmdtc/zStream.io/main/addons.xml</info>
-            <checksum>https://raw.githubusercontent.com/rgvmdtc/zStream.io/main/addons.xml.md5</checksum>
-            <datadir zip="true">https://raw.githubusercontent.com/rgvmdtc/zStream.io/main/</datadir>
+            <info compressed="false">https://rgvmdtc.github.io/zStream.io/addons.xml</info>
+            <checksum>https://rgvmdtc.github.io/zStream.io/addons.xml.md5</checksum>
+            <datadir zip="true">https://rgvmdtc.github.io/zStream.io/</datadir>
         </dir>
     </extension>
     <extension point="xbmc.addon.metadata">
         <summary>zStream Repository</summary>
         <description>Download and install zStream and keep it updated.</description>
         <platform>all</platform>
+        <assets>
+            <icon>icon.png</icon>
+        </assets>
     </extension>
 </addon>
 </addons>
