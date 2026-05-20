@@ -177,12 +177,17 @@ def show_movie_hosters(plugin, movie_id):
         xbmcplugin.endOfDirectory(plugin.handle)
         return
         
+    seen_hosters = set()
     for s in watch_data['streams']:
         stream_url = s.get('stream')
         if not stream_url:
             continue
             
         hoster_name = get_hoster_name(stream_url)
+        if hoster_name in seen_hosters:
+            continue
+        seen_hosters.add(hoster_name)
+        
         release = s.get('release', '').strip()
         release_suffix = f" ({release})" if release else ""
         
@@ -204,12 +209,17 @@ def show_episode_hosters(plugin, season_id, episode_num):
     ep_num = int(episode_num)
     matching_streams = [s for s in watch_data['streams'] if s.get('e') == ep_num]
     
+    seen_hosters = set()
     for s in matching_streams:
         stream_url = s.get('stream')
         if not stream_url:
             continue
             
         hoster_name = get_hoster_name(stream_url)
+        if hoster_name in seen_hosters:
+            continue
+        seen_hosters.add(hoster_name)
+        
         release = s.get('release', '').strip()
         release_suffix = f" ({release})" if release else ""
         
