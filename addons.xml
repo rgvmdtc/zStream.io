@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <addons>
-<addon id="plugin.video.zstream" name="zStream" version="1.0.3" provider-name="zStream Team">
+<addon id="plugin.video.zstream" name="zStream" version="1.0.4" provider-name="zStream Team">
     <requires>
         <import addon="xbmc.python" version="3.0.0"/>
         <import addon="script.module.requests" version="2.22.0"/>
