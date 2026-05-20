@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes"?>
+<settings>
+    <category label="SerienStream (s.to)">
+        <setting id="sto_domain" type="text" label="Domain (e.g. https://s.to)" default="https://s.to"/>
+        <setting id="sto_email" type="text" label="Email Address" default=""/>
+        <setting id="sto_password" type="text" option="hidden" label="Password" default=""/>
+    </category>
+    <category label="AniWorld (aniworld.to)">
+        <setting id="aniworld_domain" type="text" label="Domain (e.g. https://aniworld.to)" default="https://aniworld.to"/>
+        <setting id="aniworld_email" type="text" label="Email Address" default=""/>
+        <setting id="aniworld_password" type="text" option="hidden" label="Password" default=""/>
+    </category>
+</settings>
