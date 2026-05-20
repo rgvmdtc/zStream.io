@@ -269,8 +269,10 @@ def resolve_and_play(url, listitem):
                 url = match.group(1)
                 
             # VOE proxy bypass: if VOE uses a new domain that ResolveURL doesn't know yet, rewrite to voe.sx
-            if '/e/' in url and not resolveurl.HostedMediaFile(url).valid_url():
-                video_id = url.rstrip('/').split('/')[-1]
+            # Also handle any VOE mirror links (veev, vidara, vinovo) specifically by checking for '/e/'
+            is_voe_mirror = any(dom in url for dom in ['veev.to', 'vidara.to', 'vidara.so', 'vinovo.si', 'vinovo.to'])
+            if ('/e/' in url and (is_voe_mirror or not resolveurl.HostedMediaFile(url).valid_url())):
+                video_id = url.split('?')[0].rstrip('/').split('/')[-1]
                 voe_url = f"https://voe.sx/e/{video_id}"
                 if resolveurl.HostedMediaFile(voe_url).valid_url():
                     url = voe_url

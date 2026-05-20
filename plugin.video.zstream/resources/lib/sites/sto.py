@@ -125,3 +125,26 @@ def show_hosters(plugin, url):
             xbmcplugin.addDirectoryItem(plugin.handle, f'plugin://plugin.video.zstream/play/{safe_url}', li, isFolder=False)
             
     xbmcplugin.endOfDirectory(plugin.handle)
+
+def search(plugin, query):
+    full_url = BASE_URL + "/serien"
+    html = SessionManager('sto').get_html(full_url)
+    if not html:
+        return []
+    soup = BeautifulSoup(html, 'html.parser')
+    series_links = soup.find_all('a', href=True)
+    added = set()
+    results = []
+    query_lower = query.lower()
+    for a in series_links:
+        href = a['href']
+        if href.startswith('/serie/') and href != '/serien' and href not in added:
+            added.add(href)
+            title = a.get('title') or a.text.strip() or href.split('/')[-1]
+            if title and query_lower in title.lower():
+                results.append({
+                    'title': title,
+                    'link': href
+                })
+    return results
+

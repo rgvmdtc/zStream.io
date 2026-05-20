@@ -126,3 +126,32 @@ def show_hosters(plugin, url):
             xbmcplugin.addDirectoryItem(plugin.handle, f'plugin://plugin.video.zstream/play/{safe_url}', li, isFolder=False)
             
     xbmcplugin.endOfDirectory(plugin.handle)
+
+def search(plugin, query):
+    url = BASE_URL + "/ajax/search"
+    session_manager = SessionManager('aniworld')
+    headers = {
+        'User-Agent': session_manager.session.headers.get('User-Agent', ''),
+        'X-Requested-With': 'XMLHttpRequest'
+    }
+    try:
+        resp = session_manager.session.post(url, data={'keyword': query}, headers=headers, verify=False, timeout=10)
+        resp.raise_for_status()
+        results = resp.json()
+        
+        parsed_results = []
+        for r in results:
+            raw_title = r.get('title', '')
+            # Clean HTML tags like <em> from the title
+            clean_title = re.sub(r'<[^>]*>', '', raw_title).strip()
+            link = r.get('link', '')
+            if clean_title and link:
+                parsed_results.append({
+                    'title': clean_title,
+                    'link': link
+                })
+        return parsed_results
+    except Exception as e:
+        xbmc.log(f"zStream Aniworld Search Error: {str(e)}", xbmc.LOGERROR)
+        return []
+
