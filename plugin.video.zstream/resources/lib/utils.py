@@ -280,12 +280,17 @@ def resolve_and_play(url, listitem):
     if resolveurl.HostedMediaFile(url).valid_url():
         try:
             resolved_url = resolveurl.resolve(url)
+            handle = int(sys.argv[1])
             if resolved_url:
-                handle = int(sys.argv[1])
                 xbmcplugin.setResolvedUrl(handle, True, xbmcgui.ListItem(path=resolved_url))
             else:
                 xbmcgui.Dialog().notification("zStream", "Could not resolve URL", xbmcgui.NOTIFICATION_ERROR)
+                xbmcplugin.setResolvedUrl(handle, False, xbmcgui.ListItem())
         except Exception as e:
+            handle = int(sys.argv[1])
             xbmcgui.Dialog().notification("zStream", f"Resolve Error: {str(e)}", xbmcgui.NOTIFICATION_ERROR)
+            xbmcplugin.setResolvedUrl(handle, False, xbmcgui.ListItem())
     else:
+        handle = int(sys.argv[1])
         xbmcgui.Dialog().notification("zStream", "Unsupported hoster", xbmcgui.NOTIFICATION_ERROR)
+        xbmcplugin.setResolvedUrl(handle, False, xbmcgui.ListItem())

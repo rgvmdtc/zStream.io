@@ -1,5 +1,6 @@
 import urllib.parse
 from bs4 import BeautifulSoup
+import xbmc
 import xbmcgui
 import xbmcplugin
 import xbmcaddon
