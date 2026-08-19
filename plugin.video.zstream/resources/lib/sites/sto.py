@@ -3,7 +3,7 @@ from bs4 import BeautifulSoup
 import xbmcgui
 import xbmcplugin
 import xbmcaddon
-from resources.lib.utils import SessionManager
+from resources.lib.utils import SessionManager, notify
 
 addon = xbmcaddon.Addon()
 # serienstream.to is the current s.to. The old s.to domain is dead.
@@ -113,6 +113,8 @@ def show_hosters(plugin, url):
             li.setProperty('IsPlayable', 'true')
             xbmcplugin.addDirectoryItem(plugin.handle, f'plugin://plugin.video.zstream/play/{play_url}', li, isFolder=False)
 
+    if not added:
+        notify("No streams", "No hosters found for this episode - it may not be available yet.", 'warning', 6000)
     xbmcplugin.endOfDirectory(plugin.handle)
 
 

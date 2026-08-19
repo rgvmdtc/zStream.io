@@ -248,70 +248,168 @@ def install_resolveurl():
         xbmcgui.Dialog().notification("zStream Error", f"Failed to install: {str(e)}", xbmcgui.NOTIFICATION_ERROR)
         return False
 
+def notify(title, message, level='info', time=5000):
+    """Single place for user-facing notifications + matching Kodi log line."""
+    icons = {
+        'info': xbmcgui.NOTIFICATION_INFO,
+        'warning': xbmcgui.NOTIFICATION_WARNING,
+        'error': xbmcgui.NOTIFICATION_ERROR,
+    }
+    try:
+        xbmcgui.Dialog().notification(title, message, icons.get(level, xbmcgui.NOTIFICATION_INFO), time)
+    except Exception:
+        pass
+    log_level = xbmc.LOGERROR if level == 'error' else (xbmc.LOGWARNING if level == 'warning' else xbmc.LOGINFO)
+    xbmc.log(f"zStream [{level}] {title}: {message}", log_level)
+
+
+def _split_stream_headers(resolved):
+    """ResolveURL may return 'url|Header=val&Header2=val'. Split into (url, headers)."""
+    if '|' in resolved:
+        base, hdr = resolved.split('|', 1)
+        headers = {}
+        for kv in hdr.split('&'):
+            if '=' in kv:
+                k, v = kv.split('=', 1)
+                headers[k] = urllib.parse.unquote_plus(v)
+        return base, headers
+    return resolved, {}
+
+
+def _pick_quality(master_url, headers):
+    """
+    If the resolved stream is an HLS master playlist, apply the user's quality
+    preference (or ask). Returns the variant/master URL to play, or None if the
+    user cancelled the quality dialog.
+    default_quality setting: 0 Ask, 1 Auto, 2 Highest, 3 1080p, 4 720p, 5 480p, 6 Lowest
+    """
+    import re
+    try:
+        pref = addon.getSetting('default_quality') or '1'
+    except Exception:
+        pref = '1'
+    if pref == '1':
+        return master_url  # let inputstream.adaptive pick
+
+    try:
+        req_headers = {'User-Agent': USER_AGENT}
+        req_headers.update(headers)
+        text = requests.get(master_url, headers=req_headers, verify=False, timeout=10).text
+        if '#EXT-X-STREAM-INF' not in text:
+            return master_url  # single stream, nothing to choose
+
+        base_dir = master_url.rsplit('/', 1)[0]
+        variants = []
+        for attrs, rel in re.findall(r'#EXT-X-STREAM-INF:([^\r\n]+)[\r\n]+([^\r\n]+)', text):
+            h = re.search(r'RESOLUTION=\d+x(\d+)', attrs)
+            nm = re.search(r'NAME="([^"]+)"', attrs)
+            height = int(h.group(1)) if h else 0
+            label = nm.group(1) if nm else (f'{height}p' if height else 'Unknown')
+            variants.append((height, label, urllib.parse.urljoin(base_dir + '/', rel.strip())))
+        if not variants:
+            return master_url
+        variants.sort(key=lambda v: v[0], reverse=True)
+
+        if pref == '0':  # Ask every time
+            labels = [(lbl if lbl.lower().endswith('p') else f'{lbl} ({h}p)') for h, lbl, _ in variants]
+            choice = xbmcgui.Dialog().select('Select quality', labels)
+            return variants[choice][2] if choice >= 0 else None
+        if pref == '2':  # Highest
+            return variants[0][2]
+        if pref == '6':  # Lowest
+            return variants[-1][2]
+        target = {'3': 1080, '4': 720, '5': 480}.get(pref, 1080)
+        return min(variants, key=lambda v: abs(v[0] - target))[2]
+    except Exception as e:
+        xbmc.log(f"zStream quality pick failed, falling back to adaptive: {e}", xbmc.LOGWARNING)
+        return master_url
+
+
 def resolve_and_play(url, listitem):
     global resolveurl
+    handle = int(sys.argv[1])
+
+    def _fail():
+        xbmcplugin.setResolvedUrl(handle, False, xbmcgui.ListItem())
+
     if not resolveurl:
-        if xbmcgui.Dialog().yesno("ResolveURL Missing", "ResolveURL is required to play videos. Would you like to automatically download and install it now?"):
+        if xbmcgui.Dialog().yesno("ResolveURL Missing", "ResolveURL is required to play videos. Download and install it now?"):
             if not install_resolveurl():
+                _fail()
                 return
         else:
+            _fail()
             return
-            
     if not resolveurl:
-        xbmcgui.Dialog().notification("zStream", "ResolveURL not installed or missing dependencies", xbmcgui.NOTIFICATION_ERROR)
+        notify("zStream", "ResolveURL not installed or missing dependencies", 'error')
+        _fail()
         return
-    
-    # Fully URL decode (handles double-encoding from routing plugin)
+
+    # Fully URL decode (routing double-encodes)
     while '%' in url:
         decoded = urllib.parse.unquote(url)
         if decoded == url:
             break
         url = decoded
-    
-    # Pre-resolve internal s.to and aniworld redirects to get the true hoster URL
+
+    # Pre-resolve s.to / aniworld internal redirects to the true hoster URL
     if '/redirect/' in url or '/r?t=' in url:
         try:
-            if 's.to' in url:
-                manager = SessionManager('sto')
-            else:
-                manager = SessionManager('aniworld')
-                
-            # Pass cookies={} to bypass the AES encrypted frame-bridge and get the plaintext JS redirect
+            manager = SessionManager('sto') if ('s.to' in url or 'serienstream' in url) else SessionManager('aniworld')
             resp = manager.session.get(url, allow_redirects=True, verify=False, timeout=10, cookies={})
             url = resp.url
-            
-            # Handle javascript meta-refresh redirects commonly used by s.to
             import re
-            match = re.search(r"window\.location\.href\s*=\s*['\"]([^'\"]+)['\"]", resp.text)
-            if not match:
-                match = re.search(r'url=([^"\'\s>]+)', resp.text, re.IGNORECASE)
-                
+            match = (re.search(r"window\.location\.href\s*=\s*['\"]([^'\"]+)['\"]", resp.text)
+                     or re.search(r'url=([^"\'\s>]+)', resp.text, re.IGNORECASE))
             if match:
                 url = match.group(1)
-                
         except Exception as e:
-            xbmc.log(f"zStream Redirect Error: {str(e)}", xbmc.LOGERROR)
-            
-    # Clean URL before passing to ResolveURL (strip query params like ?jj1 which might break regex)
+            xbmc.log(f"zStream Redirect Error: {e}", xbmc.LOGERROR)
+
     if '?' in url and '/e/' in url:
         url = url.split('?')[0]
-            
-    xbmc.log(f"zStream final url passed to resolveurl: {url}", xbmc.LOGINFO)
-    
-    if resolveurl.HostedMediaFile(url).valid_url():
-        try:
-            resolved_url = resolveurl.resolve(url)
-            handle = int(sys.argv[1])
-            if resolved_url:
-                xbmcplugin.setResolvedUrl(handle, True, xbmcgui.ListItem(path=resolved_url))
-            else:
-                xbmcgui.Dialog().notification("zStream", "Could not resolve URL", xbmcgui.NOTIFICATION_ERROR)
-                xbmcplugin.setResolvedUrl(handle, False, xbmcgui.ListItem())
-        except Exception as e:
-            handle = int(sys.argv[1])
-            xbmcgui.Dialog().notification("zStream", f"Resolve Error: {str(e)}", xbmcgui.NOTIFICATION_ERROR)
-            xbmcplugin.setResolvedUrl(handle, False, xbmcgui.ListItem())
-    else:
-        handle = int(sys.argv[1])
-        xbmcgui.Dialog().notification("zStream", "Unsupported hoster", xbmcgui.NOTIFICATION_ERROR)
-        xbmcplugin.setResolvedUrl(handle, False, xbmcgui.ListItem())
+
+    xbmc.log(f"zStream resolving: {url}", xbmc.LOGINFO)
+    host = urllib.parse.urlparse(url).netloc or url
+
+    try:
+        valid = resolveurl.HostedMediaFile(url).valid_url()
+    except Exception as e:
+        valid = False
+        xbmc.log(f"zStream valid_url error: {e}", xbmc.LOGERROR)
+    if not valid:
+        notify("Unsupported host", f"{host} isn't supported yet. Try another provider.", 'warning', 6000)
+        _fail()
+        return
+
+    try:
+        resolved = resolveurl.resolve(url)
+    except Exception as e:
+        msg = str(e).lower()
+        if any(x in msg for x in ('404', 'not found', 'removed', 'deleted', 'no longer')):
+            notify("Title removed", f"This looks taken down on {host} (404). Try another provider.", 'error', 7000)
+        elif any(x in msg for x in ('timed out', 'timeout', 'connection', 'getaddrinfo', 'network', 'unreachable')):
+            notify("Network error", f"Couldn't reach {host}. Check your connection / VPN.", 'error', 7000)
+        else:
+            notify("Resolve failed", f"{host}: {str(e)[:80]}", 'error', 7000)
+        xbmc.log(f"zStream resolve exception ({host}): {e}", xbmc.LOGERROR)
+        _fail()
+        return
+
+    if not resolved:
+        notify("No stream found", f"{host} returned no playable source - it may be down or removed.", 'warning', 6000)
+        _fail()
+        return
+
+    # HLS quality selection
+    play_url, headers = _split_stream_headers(resolved)
+    if play_url.split('?')[0].endswith('.m3u8'):
+        picked = _pick_quality(play_url, headers)
+        if picked is None:
+            _fail()  # user cancelled quality dialog
+            return
+        if picked != play_url:
+            hdr_str = '&'.join(f'{k}={urllib.parse.quote_plus(v)}' for k, v in headers.items())
+            resolved = picked + (f'|{hdr_str}' if hdr_str else '')
+
+    xbmcplugin.setResolvedUrl(handle, True, xbmcgui.ListItem(path=resolved))

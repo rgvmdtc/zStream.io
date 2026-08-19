@@ -10,12 +10,11 @@
         <setting id="aniworld_email" type="text" label="Email Address" default=""/>
         <setting id="aniworld_password" type="text" option="hidden" label="Password" default=""/>
     </category>
-    <category label="Movie2k">
-        <setting id="movie2k_domain" type="text" label="Domain (rotates often)" default="https://movie2k.ch"/>
-        <setting id="movie2k_proxy" type="text" label="HTTP(S) proxy (needed if ISP-blocked, e.g. http://user:pass@host:port)" default=""/>
-    </category>
     <category label="Filmpalast">
         <setting id="filmpalast_domain" type="text" label="Domain (e.g. https://filmpalast.to)" default="https://filmpalast.to"/>
+    </category>
+    <category label="Playback">
+        <setting id="default_quality" type="enum" label="Preferred video quality" values="Ask every time|Auto (Adaptive)|Highest|1080p|720p|480p|Lowest" default="1"/>
     </category>
     <category label="ResolveURL Source">
         <setting id="resolveurl_repo" type="text" label="GitHub repo (owner/name) for our ResolveURL fork" default="rgvmdtc/zStream-ResolveURL"/>

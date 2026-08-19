@@ -95,7 +95,7 @@ def generate_index_html(addon_versions):
 </head>
 <body>
     <h1>zStream Repository <span class="badge">v{plugin_version}</span></h1>
-    <p>Stream movies and series from <strong>s.to</strong>, <strong>aniworld.to</strong> and <strong>movie2k.ch</strong> directly in Kodi.</p>
+    <p>Stream movies and series from <strong>s.to</strong>, <strong>aniworld.to</strong> and <strong>filmpalast.to</strong> directly in Kodi.</p>
 
     <h2>How to install in Kodi</h2>
     <ol>
@@ -120,7 +120,7 @@ def generate_index_html(addon_versions):
 
     <hr>
     <p style="color: #666; font-size: 0.9em;">
-        Current addon version: <strong>v{plugin_version}</strong> &mdash; s.to &bull; aniworld.to &bull; movie2k.ch &bull; Global Search
+        Current addon version: <strong>v{plugin_version}</strong> &mdash; serienstream.to s.to &bull; aniworld.to &bull; filmpalast.to &bull; Global Searchbull; aniworld.to s.to &bull; aniworld.to &bull; filmpalast.to &bull; Global Searchbull; filmpalast.to s.to &bull; aniworld.to &bull; filmpalast.to &bull; Global Searchbull; Quality Select s.to &bull; aniworld.to &bull; filmpalast.to &bull; Global Searchbull; Global Search
     </p>
 </body>
 </html>

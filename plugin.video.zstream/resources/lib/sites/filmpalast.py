@@ -5,6 +5,7 @@ import xbmc
 import xbmcgui
 import xbmcplugin
 import xbmcaddon
+from resources.lib.utils import notify
 
 addon = xbmcaddon.Addon()
 BASE_URL = (addon.getSetting('filmpalast_domain') or "https://filmpalast.to").rstrip('/')
@@ -14,14 +15,31 @@ USER_AGENT = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
 HEADERS = {'User-Agent': USER_AGENT}
 
 
+def _poster(slug, size=450):
+    """Filmpalast cover art follows a fixed path derived from the slug."""
+    return f"{BASE_URL}/files/movies/{size}/{slug}.jpg"
+
+
 def _get_html(url):
     try:
         resp = requests.get(url, headers=HEADERS, verify=False, timeout=15)
         resp.raise_for_status()
         return resp.text
+    except requests.exceptions.HTTPError as e:
+        code = getattr(e.response, 'status_code', '?')
+        if code == 404:
+            notify("Not found", "This page no longer exists on Filmpalast (404).", 'warning', 6000)
+        else:
+            notify("Filmpalast error", f"Server returned HTTP {code}.", 'error', 6000)
+        xbmc.log(f"zStream Filmpalast HTTP {code} ({url})", xbmc.LOGERROR)
+        return None
+    except requests.exceptions.Timeout:
+        notify("Timeout", "Filmpalast took too long to respond. Try again or check your VPN.", 'error', 6000)
+        xbmc.log(f"zStream Filmpalast timeout ({url})", xbmc.LOGERROR)
+        return None
     except Exception as e:
+        notify("Connection error", "Couldn't reach Filmpalast. Check your connection / VPN.", 'error', 6000)
         xbmc.log(f"zStream Filmpalast fetch error ({url}): {e}", xbmc.LOGERROR)
-        xbmcgui.Dialog().notification("Filmpalast", "Failed to load page", xbmcgui.NOTIFICATION_ERROR)
         return None
 
 
@@ -103,9 +121,15 @@ def show_list(plugin, cat, page):
         return
 
     items = parse_listing(html)
+    if not items:
+        notify("Filmpalast", "Nothing found on this page.", 'info', 4000)
+
+    xbmcplugin.setContent(plugin.handle, 'movies')
     for it in items:
         li = xbmcgui.ListItem(it['title'])
-        li.setInfo('video', {'title': it['title']})
+        li.setInfo('video', {'title': it['title'], 'mediatype': 'movie'})
+        poster = _poster(it['slug'])
+        li.setArt({'poster': poster, 'thumb': poster, 'icon': poster, 'fanart': poster})
         safe_slug = urllib.parse.quote(it['slug'], safe='')
         xbmcplugin.addDirectoryItem(
             plugin.handle,
@@ -130,11 +154,27 @@ def show_detail(plugin, slug):
 
     hosters = parse_hosters(html)
     if not hosters:
-        xbmcgui.Dialog().notification("Filmpalast", "No streams found for this title",
-                                      xbmcgui.NOTIFICATION_INFO)
+        notify("No streams", "No playable sources for this title yet - it may be new or removed.", 'warning', 6000)
+        xbmcplugin.endOfDirectory(plugin.handle)
+        return
+
+    # Pull poster + plot so each provider entry shows real artwork/metadata.
+    poster = _poster(slug)
+    plot_m = re.search(r'itemprop="description">\s*([^<]{5,})', html)
+    plot = re.sub(r'\s+', ' ', plot_m.group(1)).strip() if plot_m else ''
+    year_m = re.search(r'>(\d{4})<', html)
+    info = {'title': slug.replace('-', ' ').title(), 'mediatype': 'movie'}
+    if plot:
+        info['plot'] = plot
+    if year_m:
+        info['year'] = int(year_m.group(1))
+
+    xbmcplugin.setContent(plugin.handle, 'movies')
     for provider, stream_url in hosters:
         li = xbmcgui.ListItem(f'Play on {provider}')
         li.setProperty('IsPlayable', 'true')
+        li.setInfo('video', info)
+        li.setArt({'poster': poster, 'thumb': poster, 'fanart': poster})
         safe_url = urllib.parse.quote_plus(stream_url)
         xbmcplugin.addDirectoryItem(
             plugin.handle,

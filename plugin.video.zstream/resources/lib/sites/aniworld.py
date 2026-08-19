@@ -4,7 +4,7 @@ import xbmc
 import xbmcgui
 import xbmcplugin
 import xbmcaddon
-from resources.lib.utils import SessionManager
+from resources.lib.utils import SessionManager, notify
 import re
 
 addon = xbmcaddon.Addon()
@@ -125,7 +125,9 @@ def show_hosters(plugin, url):
             li.setProperty('IsPlayable', 'true')
             safe_url = urllib.parse.quote_plus(final_url)
             xbmcplugin.addDirectoryItem(plugin.handle, f'plugin://plugin.video.zstream/play/{safe_url}', li, isFolder=False)
-            
+
+    if not added_hosters:
+        notify("No streams", "No hosters found for this episode - it may not be available yet.", 'warning', 6000)
     xbmcplugin.endOfDirectory(plugin.handle)
 
 def search(plugin, query):

@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <addons>
-<addon id="plugin.video.zstream" name="zStream" version="1.0.6" provider-name="zStream Team">
+<addon id="plugin.video.zstream" name="zStream" version="1.0.7" provider-name="zStream Team">
     <requires>
         <import addon="xbmc.python" version="3.0.0"/>
         <import addon="script.module.requests" version="2.22.0"/>
@@ -13,8 +13,8 @@
         <provides>video</provides>
     </extension>
     <extension point="xbmc.addon.metadata">
-        <summary lang="en">zStream - The best way to watch s.to, aniworld.to, movie2k and filmpalast.to</summary>
-        <description lang="en">zStream is a video addon for s.to, aniworld.to, movie2k and filmpalast.to.</description>
+        <summary lang="en">zStream - Stream movies &amp; series from serienstream.to, aniworld.to and filmpalast.to</summary>
+        <description lang="en">zStream is a video add-on for serienstream.to, aniworld.to and filmpalast.to. Features poster artwork, video quality selection, per-provider stream sources and Global Search.</description>
         <platform>all</platform>
         <assets>
             <icon>icon.png</icon>
