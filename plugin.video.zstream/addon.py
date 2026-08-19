@@ -5,7 +5,7 @@ import xbmcplugin
 import xbmcaddon
 import routing
 
-from resources.lib.sites import sto, aniworld, movie2k
+from resources.lib.sites import sto, aniworld, movie2k, filmpalast
 from resources.lib.utils import resolve_and_play
 import urllib.parse
 
@@ -28,6 +28,7 @@ def index():
     xbmcplugin.addDirectoryItem(plugin.handle, plugin.url_for(sto_index), xbmcgui.ListItem('SerienStream (s.to)'), isFolder=True)
     xbmcplugin.addDirectoryItem(plugin.handle, plugin.url_for(aniworld_index), xbmcgui.ListItem('AniWorld (aniworld.to)'), isFolder=True)
     xbmcplugin.addDirectoryItem(plugin.handle, plugin.url_for(movie2k_index), xbmcgui.ListItem('Movie2k (movie2k.ch)'), isFolder=True)
+    xbmcplugin.addDirectoryItem(plugin.handle, plugin.url_for(filmpalast_index), xbmcgui.ListItem('Filmpalast (filmpalast.to)'), isFolder=True)
     xbmcplugin.endOfDirectory(plugin.handle)
 
 @plugin.route('/sto')
@@ -116,6 +117,18 @@ def movie2k_episode(season_id, episode_num):
 def movie2k_movie(movie_id):
     movie2k.show_movie_hosters(plugin, movie_id)
 
+@plugin.route('/filmpalast')
+def filmpalast_index():
+    filmpalast.index(plugin)
+
+@plugin.route('/filmpalast/list/<cat>/<page>')
+def filmpalast_list(cat, page):
+    filmpalast.show_list(plugin, cat, page)
+
+@plugin.route('/filmpalast/detail/<path:slug>')
+def filmpalast_detail(slug):
+    filmpalast.show_detail(plugin, slug)
+
 @plugin.route('/search')
 def global_search():
     query = xbmcgui.Dialog().input('Search movies & series', type=xbmcgui.INPUT_ALPHANUM)
@@ -148,6 +161,13 @@ def global_search():
     except Exception as e:
         xbmc.log(f"zStream movie2k Search Fail: {str(e)}", xbmc.LOGERROR)
         movie2k_results = []
+
+    # 4. Filmpalast search
+    try:
+        filmpalast_results = filmpalast.search(plugin, query)
+    except Exception as e:
+        xbmc.log(f"zStream filmpalast Search Fail: {str(e)}", xbmc.LOGERROR)
+        filmpalast_results = []
         
     # Render combined results
     for item in sto_results:
@@ -169,7 +189,13 @@ def global_search():
             title = f"[Movie2k] (Movie) {item['title']}"
             route = f'plugin://plugin.video.zstream/movie2k/movie/{item["id"]}'
         xbmcplugin.addDirectoryItem(plugin.handle, route, xbmcgui.ListItem(title), isFolder=True)
-        
+
+    for item in filmpalast_results:
+        title = f"[Filmpalast] {item['title']}"
+        safe_slug = urllib.parse.quote(item['slug'], safe='')
+        route = f'plugin://plugin.video.zstream/filmpalast/detail/{safe_slug}'
+        xbmcplugin.addDirectoryItem(plugin.handle, route, xbmcgui.ListItem(title), isFolder=True)
+
     xbmcplugin.endOfDirectory(plugin.handle)
 
 if __name__ == '__main__':

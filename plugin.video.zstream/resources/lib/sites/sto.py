@@ -6,145 +6,130 @@ import xbmcaddon
 from resources.lib.utils import SessionManager
 
 addon = xbmcaddon.Addon()
-BASE_URL = addon.getSetting('sto_domain') or "https://s.to"
-BASE_URL = BASE_URL.rstrip('/')
+# serienstream.to is the current s.to. The old s.to domain is dead.
+BASE_URL = (addon.getSetting('sto_domain') or "https://serienstream.to").rstrip('/')
+
 
 def index(plugin):
     xbmcplugin.addDirectoryItem(plugin.handle, 'plugin://plugin.video.zstream/sto/list/serien', xbmcgui.ListItem('Series'), isFolder=True)
     xbmcplugin.addDirectoryItem(plugin.handle, 'plugin://plugin.video.zstream/sto/list/beliebte-serien', xbmcgui.ListItem('Popular'), isFolder=True)
     xbmcplugin.endOfDirectory(plugin.handle)
 
+
 def show_list(plugin, url):
-    if not url.startswith('/'): url = '/' + url
-    full_url = BASE_URL + url
-    html = SessionManager('sto').get_html(full_url)
+    if not url.startswith('/'):
+        url = '/' + url
+    html = SessionManager('sto').get_html(BASE_URL + url)
     if not html:
         xbmcplugin.endOfDirectory(plugin.handle)
         return
     soup = BeautifulSoup(html, 'html.parser')
-    series_links = soup.find_all('a', href=True)
     added = set()
-    for a in series_links:
+    for a in soup.find_all('a', href=True):
         href = a['href']
-        if href.startswith('/serie/') and href != '/serien' and href not in added:
+        if href.startswith('/serie/') and href != '/serien' and '/staffel-' not in href and href not in added:
             added.add(href)
-            title = a.get('title') or a.text.strip() or href.split('/')[-1]
+            title = a.get('title') or a.text.strip() or href.split('/')[-1].replace('-', ' ').title()
             if title:
                 xbmcplugin.addDirectoryItem(plugin.handle, f'plugin://plugin.video.zstream/sto/series{href}', xbmcgui.ListItem(title), isFolder=True)
     xbmcplugin.endOfDirectory(plugin.handle)
 
+
 def show_seasons(plugin, url):
-    if not url.startswith('/'): url = '/' + url
-    full_url = BASE_URL + url
-    html = SessionManager('sto').get_html(full_url)
+    if not url.startswith('/'):
+        url = '/' + url
+    html = SessionManager('sto').get_html(BASE_URL + url)
     if not html:
         xbmcplugin.endOfDirectory(plugin.handle)
         return
     soup = BeautifulSoup(html, 'html.parser')
-    season_links = soup.find_all('a', href=True)
     added = set()
-    for a in season_links:
+    for a in soup.find_all('a', href=True):
         href = a['href']
-        if '/staffel-' in href and href not in added and not 'episode-' in href:
+        if '/staffel-' in href and 'episode-' not in href and href not in added:
             added.add(href)
             title = a.get('title') or a.text.strip() or href.split('/')[-1]
             if title.isdigit() or 'staffel' in title.lower():
-                xbmcplugin.addDirectoryItem(plugin.handle, f'plugin://plugin.video.zstream/sto/season{href}', xbmcgui.ListItem(f'Season {title}'), isFolder=True)
+                num = title if title.isdigit() else href.rstrip('/').split('-')[-1]
+                xbmcplugin.addDirectoryItem(plugin.handle, f'plugin://plugin.video.zstream/sto/season{href}', xbmcgui.ListItem(f'Season {num}'), isFolder=True)
     xbmcplugin.endOfDirectory(plugin.handle)
+
 
 def show_episodes(plugin, url):
-    if not url.startswith('/'): url = '/' + url
-    full_url = BASE_URL + url
-    html = SessionManager('sto').get_html(full_url)
+    if not url.startswith('/'):
+        url = '/' + url
+    html = SessionManager('sto').get_html(BASE_URL + url)
     if not html:
         xbmcplugin.endOfDirectory(plugin.handle)
         return
     soup = BeautifulSoup(html, 'html.parser')
-    episode_links = soup.find_all('a', href=True)
     added = set()
-    for a in episode_links:
+    # Anchor to the current season path so a prefix season can't cross-match.
+    season_prefix = url.rstrip('/') + '/episode-'
+    for a in soup.find_all('a', href=True):
         href = a['href']
-        if '/episode-' in href and url in href and href not in added:
+        if season_prefix in href and href not in added:
             added.add(href)
-            title = a.get('title') or a.text.strip() or href.split('/')[-1]
-            if title.isdigit() or 'episode' in title.lower():
-                xbmcplugin.addDirectoryItem(plugin.handle, f'plugin://plugin.video.zstream/sto/episode{href}', xbmcgui.ListItem(f'Episode {title}'), isFolder=True)
+            ep = href.rstrip('/').split('-')[-1]
+            xbmcplugin.addDirectoryItem(plugin.handle, f'plugin://plugin.video.zstream/sto/episode{href}', xbmcgui.ListItem(f'Episode {ep}'), isFolder=True)
     xbmcplugin.endOfDirectory(plugin.handle)
+
 
 def show_hosters(plugin, url):
-    if not url.startswith('/'): url = '/' + url
-    full_url = BASE_URL + url
-    session_manager = SessionManager('sto')
-    html = session_manager.get_html(full_url)
+    if not url.startswith('/'):
+        url = '/' + url
+    html = SessionManager('sto').get_html(BASE_URL + url)
     if not html:
         xbmcplugin.endOfDirectory(plugin.handle)
         return
     soup = BeautifulSoup(html, 'html.parser')
-    
-    # Very basic attempt to find redirect hoster links on the episode page
-    hoster_elements = soup.find_all(attrs={"data-play-url": True})
-    
-    # Also fallback to old 'a' tags just in case
-    hoster_links = soup.select('ul.hosterTabs a, div.hosterSiteVideo a, li[data-lang-key] a')
-    
-    added_hosters = set()
-    
-    for el in hoster_elements:
-        href = el.get('data-play-url', '')
-        if href and href not in added_hosters:
-            added_hosters.add(href)
-            hoster_name = el.get('data-provider-name', 'Hoster')
-            redirect_url = BASE_URL + href
-            
-            try:
-                resp = session_manager.session.get(redirect_url, allow_redirects=False, verify=False)
-                final_url = resp.headers.get('Location', redirect_url)
-            except:
-                final_url = redirect_url
-                
-            li = xbmcgui.ListItem(f'Play on {hoster_name}')
-            li.setProperty('IsPlayable', 'true')
-            safe_url = urllib.parse.quote_plus(final_url)
-            xbmcplugin.addDirectoryItem(plugin.handle, f'plugin://plugin.video.zstream/play/{safe_url}', li, isFolder=False)
+    added = set()
 
-    for a in hoster_links:
+    # New serienstream markup: <button data-play-url="/r?t=..." data-provider-name data-language-label>
+    for el in soup.find_all(attrs={"data-play-url": True}):
+        href = el.get('data-play-url', '')
+        if not href or href in added:
+            continue
+        added.add(href)
+        name = el.get('data-provider-name', 'Hoster')
+        lang = el.get('data-language-label', '')
+        label = name + (f' [{lang}]' if lang else '')
+        # Pass the encrypted /r?t= link straight through; resolve_and_play unwraps it.
+        play_url = urllib.parse.quote_plus(BASE_URL + href)
+        li = xbmcgui.ListItem(f'Play on {label}')
+        li.setProperty('IsPlayable', 'true')
+        xbmcplugin.addDirectoryItem(plugin.handle, f'plugin://plugin.video.zstream/play/{play_url}', li, isFolder=False)
+
+    # Legacy fallback: old /redirect/ anchors, name in child <h4>.
+    for a in soup.select('li[data-lang-key] a, div.hosterSiteVideo a'):
         href = a.get('href', '')
-        if href.startswith('/redirect/') and href not in added_hosters:
-            added_hosters.add(href)
-            hoster_name = a.text.strip() or 'Hoster'
-            redirect_url = BASE_URL + href
-            try:
-                resp = session_manager.session.get(redirect_url, allow_redirects=False, verify=False)
-                final_url = resp.headers.get('Location', redirect_url)
-            except:
-                final_url = redirect_url
-                
-            li = xbmcgui.ListItem(f'Play on {hoster_name}')
+        target = a.get('data-link-target', href)
+        if target.startswith('/redirect/') and target not in added:
+            added.add(target)
+            h4 = a.find('h4')
+            name = (h4.text.strip() if h4 else a.text.strip()) or 'Hoster'
+            play_url = urllib.parse.quote_plus(BASE_URL + target)
+            li = xbmcgui.ListItem(f'Play on {name}')
             li.setProperty('IsPlayable', 'true')
-            safe_url = urllib.parse.quote_plus(final_url)
-            xbmcplugin.addDirectoryItem(plugin.handle, f'plugin://plugin.video.zstream/play/{safe_url}', li, isFolder=False)
-            
+            xbmcplugin.addDirectoryItem(plugin.handle, f'plugin://plugin.video.zstream/play/{play_url}', li, isFolder=False)
+
     xbmcplugin.endOfDirectory(plugin.handle)
 
+
 def search(plugin, query):
-    full_url = BASE_URL + "/serien"
-    html = SessionManager('sto').get_html(full_url)
+    # serienstream killed /ajax/search. Live search is GET /suche?term=<q> (server-rendered HTML).
+    html = SessionManager('sto').get_html(f"{BASE_URL}/suche?term={urllib.parse.quote_plus(query)}")
     if not html:
         return []
     soup = BeautifulSoup(html, 'html.parser')
-    series_links = soup.find_all('a', href=True)
     added = set()
     results = []
-    query_lower = query.lower()
-    for a in series_links:
+    for a in soup.find_all('a', href=True):
         href = a['href']
-        if href.startswith('/serie/') and href != '/serien' and href not in added:
+        # Only series root links (/serie/<slug>, exactly two path segments), dedupe.
+        if href.startswith('/serie/') and href.count('/') == 2 and href not in added:
             added.add(href)
-            title = a.get('title') or a.text.strip() or href.split('/')[-1]
-            if title and query_lower in title.lower():
-                results.append({
-                    'title': title,
-                    'link': href
-                })
+            title = a.get('title') or a.text.strip() or href.split('/')[-1].replace('-', ' ').title()
+            if title:
+                results.append({'title': title, 'link': href})
     return results
-

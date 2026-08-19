@@ -139,12 +139,24 @@ def install_resolveurl():
         ctx.check_hostname = False
         ctx.verify_mode = ssl.CERT_NONE
         
+        # ResolveURL is pulled from a configurable repo so we can ship our own
+        # fork (with extra/fixed hoster resolvers) instead of the upstream one.
+        ru_repo = (addon.getSetting('resolveurl_repo') or "Gujal00/ResolveURL").strip().strip('/')
+        ru_branch = (addon.getSetting('resolveurl_branch') or "master").strip()
+        ru_token = (addon.getSetting('resolveurl_token') or "").strip()
+        if ru_token:
+            # Private repo: the API zipball endpoint honours the token through the
+            # codeload redirect, unlike the plain archive URL.
+            ru_url = f"https://api.github.com/repos/{ru_repo}/zipball/{ru_branch}"
+        else:
+            ru_url = f"https://github.com/{ru_repo}/archive/refs/heads/{ru_branch}.zip"
+
         urls = [
-            ("https://github.com/Gujal00/ResolveURL/archive/refs/heads/master.zip", "resolveurl"),
+            (ru_url, "resolveurl"),
             ("https://mirrors.kodi.tv/addons/nexus/script.module.six/script.module.six-1.16.0+matrix.1.zip", "six"),
             ("https://mirrors.kodi.tv/addons/nexus/script.module.kodi-six/script.module.kodi-six-0.1.3.1.zip", "kodi-six")
         ]
-        
+
         temp_dir = tempfile.mkdtemp()
         
         try:
@@ -161,21 +173,30 @@ def install_resolveurl():
                 
             dialog.update(int(progress), f"Downloading {name}...")
             zip_path = os.path.join(temp_dir, f"{name}.zip")
-            
-            with urllib.request.urlopen(url, context=ctx) as response, open(zip_path, 'wb') as out_file:
+
+            req = urllib.request.Request(url)
+            # Private fork? Authenticate the ResolveURL download with a GitHub token.
+            if name == "resolveurl" and ru_token:
+                req.add_header("Authorization", f"token {ru_token}")
+
+            with urllib.request.urlopen(req, context=ctx) as response, open(zip_path, 'wb') as out_file:
                 shutil.copyfileobj(response, out_file)
                 
             progress += step
             dialog.update(int(progress), f"Extracting {name}...")
             
+            marker = 'script.module.resolveurl/'
             with zipfile.ZipFile(zip_path, 'r') as z:
                 for member in z.namelist():
                     rel_path = member
-                    if name == "resolveurl" and member.startswith('ResolveURL-master/script.module.resolveurl/'):
-                        rel_path = member.replace('ResolveURL-master/', '', 1)
-                    elif name == "resolveurl":
-                        continue
-                        
+                    if name == "resolveurl":
+                        # The zip's top folder is "<repo>-<branch>/"; strip everything
+                        # before script.module.resolveurl/ so any fork name works.
+                        idx = member.find(marker)
+                        if idx == -1:
+                            continue
+                        rel_path = member[idx:]
+
                     dest_path = os.path.join(addons_dir, rel_path)
                     
                     if member.endswith('/'):
