@@ -4,6 +4,7 @@
         <setting id="sto_domain" type="text" label="Domain (e.g. https://serienstream.to)" default="https://serienstream.to"/>
         <setting id="sto_email" type="text" label="Email Address" default=""/>
         <setting id="sto_password" type="text" option="hidden" label="Password" default=""/>
+        <setting id="sto_session_cookie" type="text" option="hidden" label="Session cookie (optional - paste 'laravel_session=...; cf_clearance=...' from a browser where you solved the check)" default=""/>
     </category>
     <category label="AniWorld (aniworld.to)">
         <setting id="aniworld_domain" type="text" label="Domain (e.g. https://aniworld.to)" default="https://aniworld.to"/>

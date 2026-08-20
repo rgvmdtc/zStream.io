@@ -193,30 +193,96 @@ class SessionManager:
         self.base_url = self.base_url.rstrip('/')
         self._login()
 
+    def _apply_saved_session(self):
+        """
+        Reuse a session cookie the user obtained in their own browser.
+
+        serienstream gates every stream link behind a Cloudflare Turnstile
+        challenge. The user solves that challenge themselves in a browser and
+        pastes the resulting session cookie here; we simply carry their
+        already-authenticated session instead of trying to defeat the gate.
+        """
+        raw = (addon.getSetting(f'{self.site}_session_cookie') or '').strip()
+        if not raw:
+            return False
+        applied = 0
+        for part in raw.split(';'):
+            part = part.strip()
+            if not part or '=' not in part:
+                continue
+            name, value = part.split('=', 1)
+            name, value = name.strip(), value.strip()
+            if not name:
+                continue
+            try:
+                domain = urllib.parse.urlparse(self.base_url).netloc.split(':')[0]
+                self.session.cookies.set(name, value, domain=domain)
+                applied += 1
+            except Exception as e:
+                xbmc.log(f"zStream cookie '{name}' rejected: {e}", xbmc.LOGWARNING)
+        if applied:
+            xbmc.log(f"zStream applied {applied} saved cookie(s) for {self.site}", xbmc.LOGINFO)
+        return applied > 0
+
+    def is_logged_in(self, html=None):
+        """Detect an authenticated session from page markers."""
+        try:
+            if html is None:
+                html = self.session.get(f"{self.base_url}/", timeout=10, verify=False).text
+        except Exception:
+            return False
+        low = html.lower()
+        if '/logout' in low or 'href="/account' in low or 'id="userdropdown"' in low:
+            return True
+        return False
+
     def _login(self):
+        # A user-supplied session cookie wins: it may already carry a solved
+        # challenge, which a fresh scripted login never will.
+        if self._apply_saved_session():
+            if self.is_logged_in():
+                xbmc.log(f"zStream {self.site}: saved session is valid", xbmc.LOGINFO)
+                return True
+            xbmc.log(f"zStream {self.site}: saved session cookie looks expired", xbmc.LOGWARNING)
+
         email = addon.getSetting(f'{self.site}_email')
         password = addon.getSetting(f'{self.site}_password')
-        
-        # Usually, sites require a GET request first to fetch CSRF tokens
+        if not email or not password:
+            return False
+
         try:
             login_page = self.session.get(f"{self.base_url}/login", timeout=10, verify=False)
             soup = BeautifulSoup(login_page.text, 'html.parser')
-            # Extract possible CSRF tokens if present (many sites use _token)
+            payload = {'email': email, 'password': password}
             token_input = soup.find('input', {'name': '_token'})
-            payload = {
-                'email': email,
-                'password': password
-            }
             if token_input and token_input.get('value'):
                 payload['_token'] = token_input.get('value')
-                
-            # Perform login
-            resp = self.session.post(f"{self.base_url}/login", data=payload, timeout=10, verify=False)
-            # We assume login is successful if we don't get a 403/500, but we could check for specific cookies or text
+
+            resp = self.session.post(
+                f"{self.base_url}/login", data=payload, timeout=10, verify=False,
+                headers={'Referer': f"{self.base_url}/login"})
+
+            # Actually verify instead of assuming. A failed login previously
+            # looked identical to success and surfaced as empty folders.
+            if self.is_logged_in(resp.text) or self.is_logged_in():
+                xbmc.log(f"zStream {self.site}: login OK", xbmc.LOGINFO)
+                return True
+
+            low = resp.text.lower()
+            if 'captcha' in low or 'turnstile' in low or 'challenge' in low:
+                notify("Login blocked",
+                       f"{self.site} is asking for a CAPTCHA on login. Sign in via a browser and paste the session cookie in settings.",
+                       'error', 8000)
+            else:
+                notify("Login failed",
+                       f"{self.site} rejected those credentials - check email/password in settings.",
+                       'error', 7000)
+            return False
         except Exception as e:
             import traceback
             xbmc.log(f"zStream Login Error: {traceback.format_exc()}", xbmc.LOGERROR)
-            xbmcgui.Dialog().notification("zStream Error", f"Login failed: {str(e)}", xbmcgui.NOTIFICATION_ERROR)
+            notify("Login error", f"Couldn't reach {self.site}: {str(e)[:60]}", 'error', 7000)
+            return False
 
     def get_html(self, url):
         try:
@@ -460,10 +526,23 @@ def resolve_and_play(url, listitem):
     # Pre-resolve s.to / aniworld internal redirects to the true hoster URL
     if '/redirect/' in url or '/r?t=' in url:
         try:
-            manager = SessionManager('sto') if ('s.to' in url or 'serienstream' in url) else SessionManager('aniworld')
-            resp = manager.session.get(url, allow_redirects=True, verify=False, timeout=10, cookies={})
-            url = resp.url
+            is_sto = ('s.to' in url or 'serienstream' in url)
+            manager = SessionManager('sto') if is_sto else SessionManager('aniworld')
+            resp = manager.session.get(url, allow_redirects=True, verify=False, timeout=10)
             import re
+
+            # serienstream serves a frame-bridge page that hands the token to a
+            # Cloudflare Turnstile challenge instead of redirecting. Without a
+            # session that already cleared it, there is no stream URL here.
+            if 'frameBridge' in resp.text or 'redirect-gate' in resp.text:
+                notify("CAPTCHA required",
+                       "serienstream now protects streams with a Cloudflare check. Solve it in a browser, then paste the session cookie into zStream settings.",
+                       'error', 9000)
+                xbmc.log("zStream: hit serienstream Turnstile frame-bridge gate", xbmc.LOGERROR)
+                _fail()
+                return
+
+            url = resp.url
             match = (re.search(r"window\.location\.href\s*=\s*['\"]([^'\"]+)['\"]", resp.text)
                      or re.search(r'url=([^"\'\s>]+)', resp.text, re.IGNORECASE))
             if match:
