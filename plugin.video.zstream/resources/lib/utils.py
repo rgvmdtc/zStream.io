@@ -556,11 +556,42 @@ def resolve_and_play(url, listitem):
     xbmc.log(f"zStream resolving: {url}", xbmc.LOGINFO)
     host = urllib.parse.urlparse(url).netloc or url
 
-    try:
-        valid = resolveurl.HostedMediaFile(url).valid_url()
-    except Exception as e:
-        valid = False
-        xbmc.log(f"zStream valid_url error: {e}", xbmc.LOGERROR)
+    def _is_supported(u):
+        try:
+            return resolveurl.HostedMediaFile(u).valid_url()
+        except Exception as e:
+            xbmc.log(f"zStream valid_url error: {e}", xbmc.LOGERROR)
+            return False
+
+    valid = _is_supported(url)
+
+    # Rotation self-heal: hosts like VOE cycle through throwaway domains faster
+    # than any resolver list can track, but every mirror redirects to the canonical
+    # host (e.g. johnbeyondnation.com -> voe.sx). If the current domain isn't
+    # recognised, follow the redirect once and retry - this fixes future rotations
+    # with no code change.
+    if not valid:
+        try:
+            import re
+            r = requests.get(url, headers={'User-Agent': USER_AGENT}, allow_redirects=True,
+                             verify=False, timeout=10)
+            final = r.url
+            if final and final != url and _is_supported(final):
+                xbmc.log(f"zStream rotation self-heal: {host} -> {final}", xbmc.LOGINFO)
+                url = final
+                host = urllib.parse.urlparse(url).netloc or url
+                valid = True
+            else:
+                # Some mirrors only reveal the real host via a JS/meta redirect.
+                m = (re.search(r"(?:window\.location(?:\.href)?|top\.location)\s*=\s*['\"]([^'\"]+)['\"]", r.text)
+                     or re.search(r'<meta[^>]+http-equiv=["\']refresh["\'][^>]+url=([^"\'>\s]+)', r.text, re.I))
+                if m and _is_supported(m.group(1)):
+                    url = m.group(1)
+                    host = urllib.parse.urlparse(url).netloc or url
+                    valid = True
+        except Exception as e:
+            xbmc.log(f"zStream rotation self-heal failed for {host}: {e}", xbmc.LOGWARNING)
+
     if not valid:
         notify("Unsupported host", f"{host} isn't supported yet. Try another provider.", 'warning', 6000)
         _fail()
