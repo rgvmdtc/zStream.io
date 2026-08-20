@@ -24,7 +24,10 @@ ADDON = xbmcaddon.Addon()
 ADDON_ID = 'plugin.video.zstream'
 
 # GitHub is not DNS-blocked in the target region, so these need no DoH.
-MANIFEST_URL = 'https://raw.githubusercontent.com/rgvmdtc/zStream.io/main/addons.xml'
+# Manifest and zip are both served from GitHub Pages so the reported version and
+# its zip are always the same generation (raw.githubusercontent caches ~5 min and
+# could otherwise report a version whose zip was already replaced).
+MANIFEST_URL = 'https://rgvmdtc.github.io/zStream.io/addons.xml'
 ZIP_URL_TMPL = 'https://rgvmdtc.github.io/zStream.io/plugin.video.zstream/plugin.video.zstream-{v}.zip'
 
 CHECK_INTERVAL = 6 * 3600  # seconds between background checks
