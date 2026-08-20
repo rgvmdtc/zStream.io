@@ -6,22 +6,17 @@ import xbmc
 import xbmcgui
 import xbmcplugin
 import xbmcaddon
-import subprocess
 import sys
 import socket
 import urllib.parse
 import os
-import xbmc
+import time as _time
 import xbmcvfs
 import zipfile
 import urllib.request
 import shutil
 import tempfile
 import ssl
-import zipfile
-import urllib.request
-import shutil
-import tempfile
 
 # Force append ResolveURL to sys.path to bypass Kodi dependency graph issues
 # Force append ResolveURL and dependencies to sys.path
@@ -44,32 +39,142 @@ except Exception as e:
 
 USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 
+addon = xbmcaddon.Addon()
+
+# ---------------------------------------------------------------------------
+# DNS-over-HTTPS bypass
+#
+# Several German ISPs (CUII list) block these providers by poisoning DNS: the
+# ISP resolver hands back a sinkhole IP that serves a ~184 byte block page
+# instead of the site. Verified live: filmpalast.to and serienstream.to are
+# poisoned, aniworld.to currently is not.
+#
+# Resolving over HTTPS instead returns the true IP and the sites load normally,
+# with no VPN. This defeats DNS-level blocking only - it cannot defeat SNI/DPI
+# blocking, where the connection is killed after the TLS hello.
+# ---------------------------------------------------------------------------
+
 old_getaddrinfo = socket.getaddrinfo
+
+DOH_RESOLVERS = [
+    "https://cloudflare-dns.com/dns-query",
+    "https://dns.google/resolve",
+]
+DOH_TTL = 6 * 60 * 60  # seconds
 DOH_CACHE = {}
 
-def get_doh_ip(domain):
+# Default provider hosts. Custom domains from settings are added on top so a
+# user-configured mirror is bypassed too.
+_DEFAULT_DOH_DOMAINS = {
+    'filmpalast.to',
+    'serienstream.to',
+    'aniworld.to',
+    's.to',
+}
+
+
+def _doh_cache_file():
     try:
-        resp = requests.get(f"https://cloudflare-dns.com/dns-query?name={domain}&type=A", headers={'accept': 'application/dns-json'}, timeout=5).json()
-        for answer in resp.get('Answer', []):
-            if answer['type'] == 1:
-                return answer['data']
-    except:
-        pass
+        profile = xbmcvfs.translatePath(addon.getAddonInfo('profile'))
+    except Exception:
+        try:
+            profile = xbmc.translatePath(addon.getAddonInfo('profile'))
+        except Exception:
+            return None
+    try:
+        if not os.path.isdir(profile):
+            os.makedirs(profile)
+    except Exception:
+        return None
+    return os.path.join(profile, 'doh_cache.json')
+
+
+def _load_doh_cache():
+    """Kodi spawns a fresh process per navigation, so an in-memory cache is
+    useless - persist to the profile dir or every click re-queries DoH."""
+    path = _doh_cache_file()
+    if not path or not os.path.isfile(path):
+        return {}
+    try:
+        import json
+        with open(path, 'r') as fh:
+            data = json.load(fh)
+        now = _time.time()
+        return {h: v for h, v in data.items() if now - v.get('ts', 0) < DOH_TTL}
+    except Exception:
+        return {}
+
+
+def _save_doh_cache(cache):
+    path = _doh_cache_file()
+    if not path:
+        return
+    try:
+        import json
+        with open(path, 'w') as fh:
+            json.dump(cache, fh)
+    except Exception as e:
+        xbmc.log(f"zStream DoH cache write failed: {e}", xbmc.LOGDEBUG)
+
+
+def _doh_domains():
+    domains = set(_DEFAULT_DOH_DOMAINS)
+    for setting in ('sto_domain', 'aniworld_domain', 'filmpalast_domain'):
+        try:
+            value = (addon.getSetting(setting) or '').strip()
+        except Exception:
+            continue
+        if value:
+            host = urllib.parse.urlparse(value if '//' in value else '//' + value).netloc
+            host = host.split(':')[0].lower()
+            if host:
+                domains.add(host)
+    return domains
+
+
+def _is_bypassed(host):
+    host = (host or '').lower()
+    return any(host == d or host.endswith('.' + d) for d in _doh_domains())
+
+
+def get_doh_ip(domain):
+    """Resolve A record over HTTPS, trying each resolver in turn."""
+    for resolver in DOH_RESOLVERS:
+        try:
+            resp = requests.get(
+                resolver,
+                params={'name': domain, 'type': 'A'},
+                headers={'accept': 'application/dns-json'},
+                timeout=6,
+            )
+            resp.raise_for_status()
+            for answer in resp.json().get('Answer', []):
+                if answer.get('type') == 1 and answer.get('data'):
+                    return answer['data']
+        except Exception as e:
+            xbmc.log(f"zStream DoH {resolver} failed for {domain}: {e}", xbmc.LOGDEBUG)
     return None
 
+
+DOH_CACHE = _load_doh_cache()
+
+
 def patched_getaddrinfo(host, port, family=0, type=0, proto=0, flags=0):
-    if host == 's.to' or host == 'aniworld.to' or host.endswith('.s.to') or host.endswith('.aniworld.to'):
-        if host not in DOH_CACHE:
+    if _is_bypassed(host):
+        entry = DOH_CACHE.get(host)
+        if not entry or _time.time() - entry.get('ts', 0) >= DOH_TTL:
             ip = get_doh_ip(host)
             if ip:
-                DOH_CACHE[host] = ip
-        if host in DOH_CACHE:
-            return [(socket.AF_INET, socket.SOCK_STREAM, 6, '', (DOH_CACHE[host], port))]
+                DOH_CACHE[host] = {'ip': ip, 'ts': _time.time()}
+                _save_doh_cache(DOH_CACHE)
+                xbmc.log(f"zStream DoH resolved {host} -> {ip}", xbmc.LOGINFO)
+        entry = DOH_CACHE.get(host)
+        if entry and entry.get('ip'):
+            return [(socket.AF_INET, socket.SOCK_STREAM, 6, '', (entry['ip'], port))]
     return old_getaddrinfo(host, port, family, type, proto, flags)
 
-socket.getaddrinfo = patched_getaddrinfo
 
-addon = xbmcaddon.Addon()
+socket.getaddrinfo = patched_getaddrinfo
 
 class SessionManager:
     def __init__(self, site):
