@@ -17,6 +17,9 @@
     <category label="Playback">
         <setting id="default_quality" type="enum" label="Preferred video quality" values="Ask every time|Auto (Adaptive)|Highest|1080p|720p|480p|Lowest" default="1"/>
     </category>
+    <category label="Updates">
+        <setting id="auto_update" type="bool" label="Auto-update the add-on from GitHub (no repository needed)" default="true"/>
+    </category>
     <category label="ResolveURL Source">
         <setting id="resolveurl_repo" type="text" label="GitHub repo (owner/name) for our ResolveURL fork" default="rgvmdtc/zStream-ResolveURL"/>
         <setting id="resolveurl_branch" type="text" label="Branch" default="main"/>

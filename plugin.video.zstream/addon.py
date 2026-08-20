@@ -7,6 +7,7 @@ import routing
 
 from resources.lib.sites import sto, aniworld, filmpalast
 from resources.lib.utils import resolve_and_play
+from resources.lib import updater
 import urllib.parse
 
 plugin = routing.Plugin()
@@ -24,11 +25,24 @@ def check_credentials(site):
 
 @plugin.route('/')
 def index():
+    # Throttled background self-update: keeps the add-on current straight from
+    # GitHub without waiting on Kodi's cached repository list.
+    try:
+        updater.check_and_update()
+    except Exception as e:
+        xbmc.log(f"zStream update check skipped: {e}", xbmc.LOGWARNING)
+
     xbmcplugin.addDirectoryItem(plugin.handle, plugin.url_for(global_search), xbmcgui.ListItem('Global Search'), isFolder=True)
     xbmcplugin.addDirectoryItem(plugin.handle, plugin.url_for(sto_index), xbmcgui.ListItem('SerienStream (s.to)'), isFolder=True)
     xbmcplugin.addDirectoryItem(plugin.handle, plugin.url_for(aniworld_index), xbmcgui.ListItem('AniWorld (aniworld.to)'), isFolder=True)
     xbmcplugin.addDirectoryItem(plugin.handle, plugin.url_for(filmpalast_index), xbmcgui.ListItem('Filmpalast (filmpalast.to)'), isFolder=True)
+    xbmcplugin.addDirectoryItem(plugin.handle, plugin.url_for(check_updates), xbmcgui.ListItem('Check for updates'), isFolder=False)
     xbmcplugin.endOfDirectory(plugin.handle)
+
+@plugin.route('/check_updates')
+def check_updates():
+    if not updater.check_and_update(force=True, silent=False):
+        xbmc.executebuiltin('Container.Refresh')
 
 @plugin.route('/sto')
 def sto_index():
