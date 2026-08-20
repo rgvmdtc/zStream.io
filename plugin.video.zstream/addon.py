@@ -6,7 +6,7 @@ import xbmcaddon
 import routing
 
 from resources.lib.sites import sto, aniworld, filmpalast
-from resources.lib.utils import resolve_and_play
+from resources.lib.utils import resolve_and_play, refresh_resolveurl
 from resources.lib import updater
 import urllib.parse
 
@@ -31,6 +31,12 @@ def index():
         updater.check_and_update()
     except Exception as e:
         xbmc.log(f"zStream update check skipped: {e}", xbmc.LOGWARNING)
+    # Keep stream resolvers fresh too (VOE & co rotate domains constantly).
+    # Self-throttled, so this is a no-op most of the time.
+    try:
+        refresh_resolveurl()
+    except Exception as e:
+        xbmc.log(f"zStream resolver refresh skipped: {e}", xbmc.LOGWARNING)
 
     xbmcplugin.addDirectoryItem(plugin.handle, plugin.url_for(global_search), xbmcgui.ListItem('Global Search'), isFolder=True)
     xbmcplugin.addDirectoryItem(plugin.handle, plugin.url_for(sto_index), xbmcgui.ListItem('SerienStream (s.to)'), isFolder=True)

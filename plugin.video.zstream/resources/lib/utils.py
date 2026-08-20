@@ -12,6 +12,7 @@ import urllib.parse
 import os
 import time as _time
 import xbmcvfs
+import io
 import zipfile
 import urllib.request
 import shutil
@@ -300,6 +301,75 @@ class SessionManager:
             xbmc.log(f"zStream Fetch Error ({url}): {traceback.format_exc()}", xbmc.LOGERROR)
             xbmcgui.Dialog().notification("zStream Error", f"Failed to fetch {url}", xbmcgui.NOTIFICATION_ERROR)
             return None
+
+def refresh_resolveurl(min_interval=21600):
+    """
+    Re-download just the ResolveURL fork and overwrite the installed resolver
+    plugins. Hosters like VOE rotate to new domains constantly; the fix lives in
+    the fork's plugin files, but the add-on only ever installed ResolveURL once,
+    so those fixes never reached existing installs. This closes that gap.
+
+    Kodi runs each navigation in a fresh process, so the next Play picks up the
+    new resolver files automatically. `min_interval` is the minimum seconds since
+    the last refresh (6h for routine background calls, shorter when a stream just
+    failed as unsupported).
+    """
+    try:
+        addons_dir = xbmcvfs.translatePath('special://home/addons/')
+    except AttributeError:
+        addons_dir = xbmc.translatePath('special://home/addons/')
+
+    if not os.path.isdir(os.path.join(addons_dir, 'script.module.resolveurl')):
+        return False  # nothing installed yet; the full installer handles that
+
+    stamp = os.path.join(addons_dir, 'script.module.resolveurl', '.zstream_refresh')
+    try:
+        if os.path.isfile(stamp) and _time.time() - os.path.getmtime(stamp) < min_interval:
+            return False  # refreshed recently
+    except Exception:
+        pass
+
+    repo = (addon.getSetting('resolveurl_repo') or "rgvmdtc/zStream-ResolveURL").strip().strip('/')
+    branch = (addon.getSetting('resolveurl_branch') or "main").strip()
+    token = (addon.getSetting('resolveurl_token') or "").strip()
+    if token:
+        url = f"https://api.github.com/repos/{repo}/zipball/{branch}"
+    else:
+        url = f"https://github.com/{repo}/archive/refs/heads/{branch}.zip"
+
+    ctx = ssl.create_default_context()
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_NONE
+    marker = 'script.module.resolveurl/'
+    try:
+        req = urllib.request.Request(url, headers={'User-Agent': 'zStream'})
+        if token:
+            req.add_header('Authorization', f'token {token}')
+        data = urllib.request.urlopen(req, context=ctx, timeout=45).read()
+
+        count = 0
+        with zipfile.ZipFile(io.BytesIO(data)) as z:
+            for member in z.namelist():
+                idx = member.find(marker)
+                if idx == -1 or member.endswith('/'):
+                    continue
+                rel = member[idx:]
+                if '..' in rel:
+                    continue
+                dest = os.path.join(addons_dir, rel)
+                os.makedirs(os.path.dirname(dest), exist_ok=True)
+                with z.open(member) as src, open(dest, 'wb') as out:
+                    shutil.copyfileobj(src, out)
+                count += 1
+        with open(stamp, 'w') as fh:
+            fh.write(str(_time.time()))
+        xbmc.executebuiltin('UpdateLocalAddons')
+        xbmc.log(f"zStream refreshed ResolveURL from {repo}@{branch} ({count} files)", xbmc.LOGINFO)
+        return count > 0
+    except Exception as e:
+        xbmc.log(f"zStream ResolveURL refresh failed: {e}", xbmc.LOGWARNING)
+        return False
+
 
 def install_resolveurl():
     dialog = xbmcgui.DialogProgress()
@@ -593,7 +663,17 @@ def resolve_and_play(url, listitem):
             xbmc.log(f"zStream rotation self-heal failed for {host}: {e}", xbmc.LOGWARNING)
 
     if not valid:
-        notify("Unsupported host", f"{host} isn't supported yet. Try another provider.", 'warning', 6000)
+        # The resolver list may just be stale for a rotated host (VOE does this
+        # constantly). Pull the latest resolvers from the fork; the next Play
+        # runs in a fresh process and will recognise the host. Short floor here
+        # so a genuinely-new rotation isn't blocked by the routine throttle.
+        if refresh_resolveurl(min_interval=600):
+            notify("Resolvers updated",
+                   f"Updated stream resolvers - press Play again to open {host}.",
+                   'info', 7000)
+        else:
+            notify("Unsupported host",
+                   f"{host} isn't supported yet. Try another provider.", 'warning', 6000)
         _fail()
         return
 
