@@ -19,6 +19,14 @@ import shutil
 import tempfile
 import ssl
 
+from resources.lib.compat import ensure_tempdir, translate_path
+
+# Make tempfile usable on Android / Google TV and other locked-down platforms
+# BEFORE anything (our installer, or any imported library) touches it. Without
+# this, tempfile.mkdtemp() raises "No usable temporary directory found in
+# ['/tmp', '/var/tmp', '/usr/tmp']" and ResolveURL can never install.
+ensure_tempdir()
+
 # Force append ResolveURL to sys.path to bypass Kodi dependency graph issues
 # Force append ResolveURL and dependencies to sys.path
 try:
@@ -398,8 +406,11 @@ def install_resolveurl():
             ("https://mirrors.kodi.tv/addons/nexus/script.module.kodi-six/script.module.kodi-six-0.1.3.1.zip", "kodi-six")
         ]
 
+        # Re-assert a writable temp dir at the point of use (cheap + idempotent),
+        # so a platform without /tmp still gets a working mkdtemp here.
+        ensure_tempdir()
         temp_dir = tempfile.mkdtemp()
-        
+
         try:
             addons_dir = xbmcvfs.translatePath('special://home/addons/')
         except AttributeError:

@@ -20,6 +20,13 @@ import xbmcgui
 import xbmcaddon
 import xbmcvfs
 
+from resources.lib.compat import ensure_tempdir
+
+# Android / Google TV and other locked-down platforms have no usable /tmp, which
+# makes tempfile.mkdtemp() (used when self-installing an update) blow up. Fix it
+# up front, before any tempfile call runs.
+ensure_tempdir()
+
 ADDON = xbmcaddon.Addon()
 ADDON_ID = 'plugin.video.zstream'
 
@@ -110,6 +117,7 @@ def remote_version():
 def _install_zip(zip_bytes):
     """Extract the add-on zip straight into the Kodi addons directory."""
     addons_dir = _translate('special://home/addons/')
+    ensure_tempdir()  # idempotent; guarantees mkdtemp works on Android/Google TV
     tmp = tempfile.mkdtemp()
     try:
         zip_path = os.path.join(tmp, 'update.zip')
