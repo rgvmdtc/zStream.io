@@ -646,11 +646,38 @@ def resolve_and_play(url, listitem):
 
     valid = _is_supported(url)
 
-    # Rotation self-heal: hosts like VOE cycle through throwaway domains faster
-    # than any resolver list can track, but every mirror redirects to the canonical
-    # host (e.g. johnbeyondnation.com -> voe.sx). If the current domain isn't
-    # recognised, follow the redirect once and retry - this fixes future rotations
-    # with no code change.
+    # VOE rotation self-heal.
+    #
+    # VOE cycles through throwaway mirror domains (johnbeyondnation.com,
+    # tracylocalschool.com, ...) faster than any resolver domain list can track,
+    # and serienstream hands us the *current mirror* directly. But voe.sx is the
+    # stable canonical: voe.sx/e/<id> serves a redirect page pointing at whatever
+    # today's mirror is, using the SAME id, and the VOE resolver already follows
+    # that redirect. So if an unknown host carries a VOE id, we reroute through
+    # voe.sx/e/<id> - and every future rotation resolves with zero code changes.
+    if not valid:
+        try:
+            import re
+            m = re.search(r'https?://[^/]+/(?:e/|v/|d/)?([0-9A-Za-z]+)', url)
+            if m:
+                vid = m.group(1)
+                canonical = f'https://voe.sx/e/{vid}'
+                bare_host = host.split(':')[0].lower()
+                r = requests.get(canonical, headers={'User-Agent': USER_AGENT},
+                                 verify=False, timeout=10, allow_redirects=False)
+                # voe.sx confirms this id by naming the current mirror (our host)
+                # in its redirect page - proof it really is a VOE link.
+                same = bare_host and bare_host in r.text.lower()
+                if (same or 'const currenturl' in r.text.lower()) and _is_supported(canonical):
+                    xbmc.log(f"zStream VOE self-heal: {host} -> voe.sx/e/{vid}", xbmc.LOGINFO)
+                    url = canonical
+                    host = 'voe.sx'
+                    valid = True
+        except Exception as e:
+            xbmc.log(f"zStream VOE self-heal failed for {host}: {e}", xbmc.LOGWARNING)
+
+    # Generic redirect self-heal for non-VOE mirrors that 30x/JS-redirect to a
+    # host the resolver already knows.
     if not valid:
         try:
             import re
@@ -658,12 +685,11 @@ def resolve_and_play(url, listitem):
                              verify=False, timeout=10)
             final = r.url
             if final and final != url and _is_supported(final):
-                xbmc.log(f"zStream rotation self-heal: {host} -> {final}", xbmc.LOGINFO)
+                xbmc.log(f"zStream redirect self-heal: {host} -> {final}", xbmc.LOGINFO)
                 url = final
                 host = urllib.parse.urlparse(url).netloc or url
                 valid = True
             else:
-                # Some mirrors only reveal the real host via a JS/meta redirect.
                 m = (re.search(r"(?:window\.location(?:\.href)?|top\.location)\s*=\s*['\"]([^'\"]+)['\"]", r.text)
                      or re.search(r'<meta[^>]+http-equiv=["\']refresh["\'][^>]+url=([^"\'>\s]+)', r.text, re.I))
                 if m and _is_supported(m.group(1)):
@@ -671,7 +697,7 @@ def resolve_and_play(url, listitem):
                     host = urllib.parse.urlparse(url).netloc or url
                     valid = True
         except Exception as e:
-            xbmc.log(f"zStream rotation self-heal failed for {host}: {e}", xbmc.LOGWARNING)
+            xbmc.log(f"zStream redirect self-heal failed for {host}: {e}", xbmc.LOGWARNING)
 
     if not valid:
         # The resolver list may just be stale for a rotated host (VOE does this
