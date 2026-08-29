@@ -7,6 +7,7 @@ import routing
 
 from resources.lib.sites import sto, aniworld, filmpalast, kinoger
 from resources.lib.utils import resolve_and_play, refresh_resolveurl
+from resources.lib import updater
 import urllib.parse
 
 plugin = routing.Plugin()
@@ -31,6 +32,13 @@ def index():
         refresh_resolveurl()
     except Exception as e:
         xbmc.log(f"zStream resolver refresh skipped: {e}", xbmc.LOGWARNING)
+    # Silent self-update straight from GitHub (throttled), alongside Kodi's own
+    # auto-update - so new versions land on launch instead of waiting on Kodi's
+    # repository recheck timer.
+    try:
+        updater.check_and_update()
+    except Exception as e:
+        xbmc.log(f"zStream self-update skipped: {e}", xbmc.LOGWARNING)
 
     xbmcplugin.addDirectoryItem(plugin.handle, plugin.url_for(global_search), xbmcgui.ListItem('Global Search'), isFolder=True)
     xbmcplugin.addDirectoryItem(plugin.handle, plugin.url_for(sto_index), xbmcgui.ListItem('SerienStream (s.to)'), isFolder=True)

@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <addons>
-<addon id="plugin.video.zstream" name="zStream" version="1.0.18" provider-name="zStream Team">
+<addon id="plugin.video.zstream" name="zStream" version="1.0.19" provider-name="zStream Team">
     <requires>
         <import addon="xbmc.python" version="3.0.0"/>
         <import addon="script.module.requests" version="2.22.0"/>
@@ -13,8 +13,8 @@
         <provides>video</provides>
     </extension>
     <extension point="xbmc.addon.metadata">
-        <summary lang="en">zStream - Stream movies &amp; series from serienstream.to, aniworld.to and filmpalast.to</summary>
-        <description lang="en">zStream is a video add-on for serienstream.to, aniworld.to and filmpalast.to. Features poster artwork, video quality selection, per-provider stream sources and Global Search.</description>
+        <summary lang="en">zStream - Stream movies &amp; series from serienstream.to, aniworld.to, filmpalast.to and kinoger.com</summary>
+        <description lang="en">zStream is a video add-on for serienstream.to, aniworld.to, filmpalast.to and kinoger.com (German dubs). Poster artwork, native Kodi quality selection via inputstream.adaptive, per-provider stream sources, self-update and Global Search.</description>
         <platform>all</platform>
         <assets>
             <icon>icon.png</icon>
