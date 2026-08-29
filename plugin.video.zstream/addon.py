@@ -5,9 +5,8 @@ import xbmcplugin
 import xbmcaddon
 import routing
 
-from resources.lib.sites import sto, aniworld, filmpalast
+from resources.lib.sites import sto, aniworld, filmpalast, kinoger
 from resources.lib.utils import resolve_and_play, refresh_resolveurl
-from resources.lib import updater
 import urllib.parse
 
 plugin = routing.Plugin()
@@ -25,14 +24,9 @@ def check_credentials(site):
 
 @plugin.route('/')
 def index():
-    # Throttled background self-update: keeps the add-on current straight from
-    # GitHub without waiting on Kodi's cached repository list.
-    try:
-        updater.check_and_update()
-    except Exception as e:
-        xbmc.log(f"zStream update check skipped: {e}", xbmc.LOGWARNING)
-    # Keep stream resolvers fresh too (VOE & co rotate domains constantly).
-    # Self-throttled, so this is a no-op most of the time.
+    # Keep the ResolveURL resolvers fresh (VOE & co rotate domains constantly).
+    # Self-throttled, so this is a no-op most of the time. The add-on itself is
+    # updated by Kodi's own auto-update from the repository.
     try:
         refresh_resolveurl()
     except Exception as e:
@@ -42,13 +36,8 @@ def index():
     xbmcplugin.addDirectoryItem(plugin.handle, plugin.url_for(sto_index), xbmcgui.ListItem('SerienStream (s.to)'), isFolder=True)
     xbmcplugin.addDirectoryItem(plugin.handle, plugin.url_for(aniworld_index), xbmcgui.ListItem('AniWorld (aniworld.to)'), isFolder=True)
     xbmcplugin.addDirectoryItem(plugin.handle, plugin.url_for(filmpalast_index), xbmcgui.ListItem('Filmpalast (filmpalast.to)'), isFolder=True)
-    xbmcplugin.addDirectoryItem(plugin.handle, plugin.url_for(check_updates), xbmcgui.ListItem('Check for updates'), isFolder=False)
+    xbmcplugin.addDirectoryItem(plugin.handle, plugin.url_for(kinoger_index), xbmcgui.ListItem('KinoGer (kinoger.com)'), isFolder=True)
     xbmcplugin.endOfDirectory(plugin.handle)
-
-@plugin.route('/check_updates')
-def check_updates():
-    if not updater.check_and_update(force=True, silent=False):
-        xbmc.executebuiltin('Container.Refresh')
 
 @plugin.route('/sto')
 def sto_index():
@@ -116,6 +105,26 @@ def filmpalast_list(cat, page):
 def filmpalast_detail(slug):
     filmpalast.show_detail(plugin, slug)
 
+@plugin.route('/kinoger')
+def kinoger_index():
+    kinoger.index(plugin)
+
+@plugin.route('/kinoger/list/<page>')
+def kinoger_list(page):
+    kinoger.show_list(plugin, page)
+
+@plugin.route('/kinoger/cat/<cat>/<page>')
+def kinoger_cat(cat, page):
+    kinoger.show_category(plugin, cat, page)
+
+@plugin.route('/kinoger/detail/<path:post_url>')
+def kinoger_detail(post_url):
+    kinoger.show_detail(plugin, post_url)
+
+@plugin.route('/kinoger/episode/<path:payload>')
+def kinoger_episode(payload):
+    kinoger.show_episode(plugin, payload)
+
 @plugin.route('/search')
 def global_search():
     query = xbmcgui.Dialog().input('Search movies & series', type=xbmcgui.INPUT_ALPHANUM)
@@ -148,7 +157,14 @@ def global_search():
     except Exception as e:
         xbmc.log(f"zStream filmpalast Search Fail: {str(e)}", xbmc.LOGERROR)
         filmpalast_results = []
-        
+
+    # 4. KinoGer search
+    try:
+        kinoger_results = kinoger.search(plugin, query)
+    except Exception as e:
+        xbmc.log(f"zStream kinoger Search Fail: {str(e)}", xbmc.LOGERROR)
+        kinoger_results = []
+
     # Render combined results
     for item in sto_results:
         title = f"[s.to] {item['title']}"
@@ -164,6 +180,12 @@ def global_search():
         title = f"[Filmpalast] {item['title']}"
         safe_slug = urllib.parse.quote(item['slug'], safe='')
         route = f'plugin://plugin.video.zstream/filmpalast/detail/{safe_slug}'
+        xbmcplugin.addDirectoryItem(plugin.handle, route, xbmcgui.ListItem(title), isFolder=True)
+
+    for item in kinoger_results:
+        title = f"[KinoGer] {item['title']}"
+        safe_url = urllib.parse.quote(item['url'], safe='')
+        route = f'plugin://plugin.video.zstream/kinoger/detail/{safe_url}'
         xbmcplugin.addDirectoryItem(plugin.handle, route, xbmcgui.ListItem(title), isFolder=True)
 
     xbmcplugin.endOfDirectory(plugin.handle)

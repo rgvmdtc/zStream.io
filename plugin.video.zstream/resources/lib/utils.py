@@ -7,6 +7,7 @@ import xbmcgui
 import xbmcplugin
 import xbmcaddon
 import sys
+import re
 import socket
 import urllib.parse
 import os
@@ -528,53 +529,25 @@ def _split_stream_headers(resolved):
     return resolved, {}
 
 
-def _pick_quality(master_url, headers):
+def _extract_fsst(embed_url):
     """
-    If the resolved stream is an HLS master playlist, apply the user's quality
-    preference (or ask). Returns the variant/master URL to play, or None if the
-    user cancelled the quality dialog.
-    default_quality setting: 0 Ask, 1 Auto, 2 Highest, 3 1080p, 4 720p, 5 480p, 6 Lowest
+    fsst.online / incvideo progressive host (kinoger's main mirror). ResolveURL's
+    resolver for it is stale, so pull the mp4 links straight from the embed page
+    and return the highest quality: (mp4_url, headers).
     """
-    import re
     try:
-        pref = addon.getSetting('default_quality') or '1'
-    except Exception:
-        pref = '1'
-    if pref == '1':
-        return master_url  # let inputstream.adaptive pick
-
-    try:
-        req_headers = {'User-Agent': USER_AGENT}
-        req_headers.update(headers)
-        text = requests.get(master_url, headers=req_headers, verify=False, timeout=10).text
-        if '#EXT-X-STREAM-INF' not in text:
-            return master_url  # single stream, nothing to choose
-
-        base_dir = master_url.rsplit('/', 1)[0]
-        variants = []
-        for attrs, rel in re.findall(r'#EXT-X-STREAM-INF:([^\r\n]+)[\r\n]+([^\r\n]+)', text):
-            h = re.search(r'RESOLUTION=\d+x(\d+)', attrs)
-            nm = re.search(r'NAME="([^"]+)"', attrs)
-            height = int(h.group(1)) if h else 0
-            label = nm.group(1) if nm else (f'{height}p' if height else 'Unknown')
-            variants.append((height, label, urllib.parse.urljoin(base_dir + '/', rel.strip())))
-        if not variants:
-            return master_url
-        variants.sort(key=lambda v: v[0], reverse=True)
-
-        if pref == '0':  # Ask every time
-            labels = [(lbl if lbl.lower().endswith('p') else f'{lbl} ({h}p)') for h, lbl, _ in variants]
-            choice = xbmcgui.Dialog().select('Select quality', labels)
-            return variants[choice][2] if choice >= 0 else None
-        if pref == '2':  # Highest
-            return variants[0][2]
-        if pref == '6':  # Lowest
-            return variants[-1][2]
-        target = {'3': 1080, '4': 720, '5': 480}.get(pref, 1080)
-        return min(variants, key=lambda v: abs(v[0] - target))[2]
+        sess = requests.Session()
+        sess.headers.update({'User-Agent': USER_AGENT, 'Referer': 'https://kinoger.com/'})
+        r = sess.get(embed_url, verify=False, timeout=15)
+        ref = 'https://' + urllib.parse.urlparse(r.url).netloc + '/'
+        quals = re.findall(r'\[(\d+)p\](https?://[^\s,"\']+\.mp4)/?', r.text)
+        if not quals:
+            return None
+        quals.sort(key=lambda x: int(x[0]), reverse=True)
+        return quals[0][1], {'Referer': ref, 'User-Agent': USER_AGENT}
     except Exception as e:
-        xbmc.log(f"zStream quality pick failed, falling back to adaptive: {e}", xbmc.LOGWARNING)
-        return master_url
+        xbmc.log(f"zStream fsst extract failed: {e}", xbmc.LOGWARNING)
+        return None
 
 
 def resolve_and_play(url, listitem):
@@ -583,6 +556,25 @@ def resolve_and_play(url, listitem):
 
     def _fail():
         xbmcplugin.setResolvedUrl(handle, False, xbmcgui.ListItem())
+
+    # Fully URL decode (routing double-encodes)
+    while '%' in url:
+        decoded = urllib.parse.unquote(url)
+        if decoded == url:
+            break
+        url = decoded
+
+    # fsst / incvideo is a direct extractor - it needs no ResolveURL, so handle
+    # it before the ResolveURL gate (kinoger movies often have only this host).
+    _early_host = urllib.parse.urlparse(url).netloc or url
+    if re.search(r'(?:^|\.)(?:fsst|incvideo\d*)\.', _early_host, re.I):
+        direct = _extract_fsst(url)
+        if direct:
+            _play(handle, direct[0], direct[1])
+            return
+        notify("No stream found", f"{_early_host} returned no playable source.", 'warning', 6000)
+        _fail()
+        return
 
     if not resolveurl:
         if xbmcgui.Dialog().yesno("ResolveURL Missing", "ResolveURL is required to play videos. Download and install it now?"):
@@ -597,20 +589,12 @@ def resolve_and_play(url, listitem):
         _fail()
         return
 
-    # Fully URL decode (routing double-encodes)
-    while '%' in url:
-        decoded = urllib.parse.unquote(url)
-        if decoded == url:
-            break
-        url = decoded
-
     # Pre-resolve s.to / aniworld internal redirects to the true hoster URL
     if '/redirect/' in url or '/r?t=' in url:
         try:
             is_sto = ('s.to' in url or 'serienstream' in url)
             manager = SessionManager('sto') if is_sto else SessionManager('aniworld')
             resp = manager.session.get(url, allow_redirects=True, verify=False, timeout=10)
-            import re
 
             # serienstream serves a frame-bridge page that hands the token to a
             # Cloudflare Turnstile challenge instead of redirecting. Without a
@@ -657,7 +641,6 @@ def resolve_and_play(url, listitem):
     # voe.sx/e/<id> - and every future rotation resolves with zero code changes.
     if not valid:
         try:
-            import re
             m = re.search(r'https?://[^/]+/(?:e/|v/|d/)?([0-9A-Za-z]+)', url)
             if m:
                 vid = m.group(1)
@@ -680,7 +663,6 @@ def resolve_and_play(url, listitem):
     # host the resolver already knows.
     if not valid:
         try:
-            import re
             r = requests.get(url, headers={'User-Agent': USER_AGENT}, allow_redirects=True,
                              verify=False, timeout=10)
             final = r.url
@@ -733,15 +715,49 @@ def resolve_and_play(url, listitem):
         _fail()
         return
 
-    # HLS quality selection
     play_url, headers = _split_stream_headers(resolved)
-    if play_url.split('?')[0].endswith('.m3u8'):
-        picked = _pick_quality(play_url, headers)
-        if picked is None:
-            _fail()  # user cancelled quality dialog
-            return
-        if picked != play_url:
-            hdr_str = '&'.join(f'{k}={urllib.parse.quote_plus(v)}' for k, v in headers.items())
-            resolved = picked + (f'|{hdr_str}' if hdr_str else '')
+    _play(handle, play_url, headers)
 
-    xbmcplugin.setResolvedUrl(handle, True, xbmcgui.ListItem(path=resolved))
+
+def _play(handle, play_url, headers):
+    """
+    Hand the stream to Kodi. HLS is played through inputstream.adaptive so the
+    OFFICIAL Kodi quality picker ("Video settings > Video stream" during
+    playback) lists every resolution the manifest offers. Progressive files
+    (mp4) play directly - Kodi cannot list separate files in that selector, so
+    there is nothing to choose.
+    """
+    headers = headers or {}
+    is_hls = play_url.split('?')[0].lower().endswith(('.m3u8', '.m3u'))
+
+    ia_available = False
+    if is_hls:
+        try:
+            ia_available = xbmc.getCondVisibility('System.HasAddon(inputstream.adaptive)')
+        except Exception:
+            ia_available = False
+
+    if is_hls and ia_available:
+        li = xbmcgui.ListItem(path=play_url)
+        try:
+            li.setContentLookup(False)
+        except Exception:
+            pass
+        li.setMimeType('application/vnd.apple.mpegurl')
+        li.setProperty('inputstream', 'inputstream.adaptive')     # Kodi 19+
+        li.setProperty('inputstreamaddon', 'inputstream.adaptive')  # Kodi 18
+        li.setProperty('inputstream.adaptive.manifest_type', 'hls')  # <= Kodi 20
+        if headers:
+            hdr = '&'.join(f'{k}={urllib.parse.quote(v)}' for k, v in headers.items())
+            li.setProperty('inputstream.adaptive.manifest_headers', hdr)
+            li.setProperty('inputstream.adaptive.stream_headers', hdr)
+        xbmcplugin.setResolvedUrl(handle, True, li)
+        return
+
+    # Progressive file, or HLS without inputstream.adaptive: keep Kodi's
+    # url|Header=value form so its built-in ffmpeg player sends the headers.
+    # (Without IA, Kodi still plays HLS - just no native quality menu.)
+    if headers:
+        hdr = '&'.join(f'{k}={urllib.parse.quote(v)}' for k, v in headers.items())
+        play_url = f'{play_url}|{hdr}'
+    xbmcplugin.setResolvedUrl(handle, True, xbmcgui.ListItem(path=play_url))
