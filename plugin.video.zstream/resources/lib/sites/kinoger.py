@@ -5,7 +5,7 @@ import xbmc
 import xbmcgui
 import xbmcplugin
 import xbmcaddon
-from resources.lib.utils import notify
+from resources.lib.utils import notify, extract_fsst_qualities
 
 addon = xbmcaddon.Addon()
 BASE_URL = (addon.getSetting('kinoger_domain') or "https://kinoger.com").rstrip('/')
@@ -168,10 +168,27 @@ def show_detail(plugin, post_url):
     xbmcplugin.setContent(plugin.handle, 'movies')
 
     if len(groups) == 1:
-        # Movie: list each mirror as a Play option (VOE/Firestream/etc. resolve to
-        # HLS with native Kodi quality selection; fsst falls back to direct mp4).
+        # Movie: list each mirror as a Play option. HLS hosts (VOE/Firestream/
+        # FlyFile) resolve to adaptive streams, so Kodi's native "Video stream"
+        # quality menu works during playback. fsst serves separate progressive
+        # mp4s, which Kodi cannot list in that menu - so we expose each quality
+        # as its own Play item instead.
         for stream_url in groups[0]:
             host = urllib.parse.urlparse(stream_url).netloc.replace('www.', '')
+            if re.search(r'(?:fsst|incvideo)', host, re.I):
+                quals = extract_fsst_qualities(stream_url)
+                for _h, label, mp4, hdrs in quals:
+                    hdr = '&'.join(f'{k}={urllib.parse.quote(v)}' for k, v in hdrs.items())
+                    play = urllib.parse.quote_plus(f'{mp4}|{hdr}')
+                    li = xbmcgui.ListItem(f'{host} - {label}')
+                    li.setProperty('IsPlayable', 'true')
+                    li.setInfo('video', {'title': title, 'mediatype': 'movie'})
+                    if art:
+                        li.setArt(art)
+                    xbmcplugin.addDirectoryItem(
+                        plugin.handle, f'plugin://plugin.video.zstream/play/{play}', li, isFolder=False)
+                if quals:
+                    continue
             li = xbmcgui.ListItem(f'Play on {host}')
             li.setProperty('IsPlayable', 'true')
             li.setInfo('video', {'title': title, 'mediatype': 'movie'})

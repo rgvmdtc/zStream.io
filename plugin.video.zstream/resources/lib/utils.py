@@ -529,25 +529,39 @@ def _split_stream_headers(resolved):
     return resolved, {}
 
 
-def _extract_fsst(embed_url):
+def extract_fsst_qualities(embed_url):
     """
     fsst.online / incvideo progressive host (kinoger's main mirror). ResolveURL's
-    resolver for it is stale, so pull the mp4 links straight from the embed page
-    and return the highest quality: (mp4_url, headers).
+    resolver for it is stale, so pull the mp4 links straight from the embed page.
+    Returns [(height, label, mp4_url, headers)] sorted high -> low.
     """
     try:
         sess = requests.Session()
         sess.headers.update({'User-Agent': USER_AGENT, 'Referer': 'https://kinoger.com/'})
         r = sess.get(embed_url, verify=False, timeout=15)
         ref = 'https://' + urllib.parse.urlparse(r.url).netloc + '/'
-        quals = re.findall(r'\[(\d+)p\](https?://[^\s,"\']+\.mp4)/?', r.text)
-        if not quals:
-            return None
-        quals.sort(key=lambda x: int(x[0]), reverse=True)
-        return quals[0][1], {'Referer': ref, 'User-Agent': USER_AGENT}
+        hdrs = {'Referer': ref, 'User-Agent': USER_AGENT}
+        # The embed repeats its source list several times - dedupe by height.
+        seen, out = set(), []
+        for h, u in re.findall(r'\[(\d+)p\](https?://[^\s,"\']+\.mp4)/?', r.text):
+            h = int(h)
+            if h not in seen:
+                seen.add(h)
+                out.append((h, f'{h}p', u, hdrs))
+        out.sort(key=lambda x: x[0], reverse=True)
+        return out
     except Exception as e:
         xbmc.log(f"zStream fsst extract failed: {e}", xbmc.LOGWARNING)
+        return []
+
+
+def _extract_fsst(embed_url):
+    """Highest-quality fsst mp4 as (url, headers) - used when playing a bare embed."""
+    quals = extract_fsst_qualities(embed_url)
+    if not quals:
         return None
+    _h, _lbl, url, headers = quals[0]
+    return url, headers
 
 
 def resolve_and_play(url, listitem):
@@ -563,6 +577,14 @@ def resolve_and_play(url, listitem):
         if decoded == url:
             break
         url = decoded
+
+    # Already a direct media URL (e.g. a specific fsst quality chosen from the
+    # list, or any pre-resolved stream). Play it as-is - no ResolveURL needed.
+    _clean = url.split('|')[0].split('?')[0].lower()
+    if _clean.endswith(('.mp4', '.m3u8', '.m3u', '.mkv', '.mpd', '.ts')):
+        pu, hd = _split_stream_headers(url)
+        _play(handle, pu, hd)
+        return
 
     # fsst / incvideo is a direct extractor - it needs no ResolveURL, so handle
     # it before the ResolveURL gate (kinoger movies often have only this host).
