@@ -741,25 +741,44 @@ def resolve_and_play(url, listitem):
     _play(handle, play_url, headers)
 
 
+def _hls_variant_count(master_url, headers):
+    """Number of #EXT-X-STREAM-INF entries in an HLS master (0 if not a master)."""
+    try:
+        req_headers = {'User-Agent': USER_AGENT}
+        req_headers.update(headers or {})
+        text = requests.get(master_url, headers=req_headers, verify=False, timeout=8).text
+        return text.count('#EXT-X-STREAM-INF')
+    except Exception as e:
+        xbmc.log(f"zStream HLS probe failed: {e}", xbmc.LOGDEBUG)
+        return 0
+
+
 def _play(handle, play_url, headers):
     """
-    Hand the stream to Kodi. HLS is played through inputstream.adaptive so the
-    OFFICIAL Kodi quality picker ("Video settings > Video stream" during
-    playback) lists every resolution the manifest offers. Progressive files
-    (mp4) play directly - Kodi cannot list separate files in that selector, so
-    there is nothing to choose.
+    Hand the stream to Kodi.
+
+    Multi-variant HLS (real adaptive streams like FlyFile) go through
+    inputstream.adaptive so the OFFICIAL Kodi quality picker ("Video settings >
+    Video stream") lists every resolution.
+
+    Single-variant HLS (VOE/Vixeo/VIDARA usually serve one 720p rendition) and
+    progressive mp4 are played DIRECTLY through Kodi's built-in player. IA adds
+    no quality choice for a single rendition and its smaller buffer stutters on
+    these; Kodi's native read-ahead cache is much steadier.
     """
     headers = headers or {}
     is_hls = play_url.split('?')[0].lower().endswith(('.m3u8', '.m3u'))
 
-    ia_available = False
+    use_ia = False
     if is_hls:
         try:
             ia_available = xbmc.getCondVisibility('System.HasAddon(inputstream.adaptive)')
         except Exception:
             ia_available = False
+        # Only worth IA when there is more than one quality to choose from.
+        use_ia = ia_available and _hls_variant_count(play_url, headers) > 1
 
-    if is_hls and ia_available:
+    if use_ia:
         li = xbmcgui.ListItem(path=play_url)
         try:
             li.setContentLookup(False)
@@ -776,9 +795,9 @@ def _play(handle, play_url, headers):
         xbmcplugin.setResolvedUrl(handle, True, li)
         return
 
-    # Progressive file, or HLS without inputstream.adaptive: keep Kodi's
-    # url|Header=value form so its built-in ffmpeg player sends the headers.
-    # (Without IA, Kodi still plays HLS - just no native quality menu.)
+    # Progressive file, or single-variant HLS: play through Kodi's built-in
+    # player. Keep the url|Header=value form so it sends the headers, and let
+    # Kodi's read-ahead cache handle buffering (steadier than IA here).
     if headers:
         hdr = '&'.join(f'{k}={urllib.parse.quote(v)}' for k, v in headers.items())
         play_url = f'{play_url}|{hdr}'
